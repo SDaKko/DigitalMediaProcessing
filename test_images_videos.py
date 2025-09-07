@@ -78,6 +78,14 @@ output_path = r'C:\Videos\output.mp4'
 # output_path = r'C:\Videos\output.mov'
 read_write_file(input_path, output_path)
 
+# Задание 5
+img_new = cv2.imread(r'C:\Pics\zakat.jpg')
+hsv_img_new = cv2.cvtColor(img_new, cv2.COLOR_BGR2HSV)
+cv2.imshow("img_new", img_new)
+cv2.waitKey(1000)
+cv2.imshow("hsv_img_new", hsv_img_new)
+cv2.waitKey(1000)
+cv2.destroyAllWindows()
 
 
 
