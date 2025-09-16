@@ -10,7 +10,7 @@ while True:
     if not(ret):
         break
 
-    cv2.imshow('iVCam iPhone Camera', frame)
+    cv2.imshow('iVCam Phone Camera', frame)
 
     if cv2.waitKey(1) & 0xFF == 27:
         break
