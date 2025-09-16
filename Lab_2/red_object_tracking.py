@@ -42,11 +42,26 @@ def red_object_tracking():
             M = cv2.moments(largest_contour)
             area = M['m00']
 
+            if area > 1000:
+                if area > 0:
+                    cx = int(M['m10'] / area)
+                    cy = int(M['m01'] / area)
+
+                    cv2.circle(result_frame, (cx, cy), 5, (0, 255, 0), -1)
+
+                x, y, w, h = cv2.boundingRect(largest_contour)
+
+                cv2.rectangle(result_frame, (x, y), (x + w, y + h), (0, 0, 0), 3)
+
+                cv2.putText(result_frame, f"Area: {int(area)}", (x, y - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+
         cv2.imshow('video', frame)
         cv2.imshow('Red Mask (Threshold)', red_mask)
         cv2.imshow('Red Only', red_only)
         cv2.imshow('After Opening', opening)
         cv2.imshow('After Closing', closing)
+        cv2.imshow('Result with Rectangle', result_frame)
 
 
         if cv2.waitKey(1) & 0xFF == 27:
