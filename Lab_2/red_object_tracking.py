@@ -29,9 +29,15 @@ def red_object_tracking():
 
         red_only = cv2.bitwise_and(frame, frame, mask=red_mask)
 
+        kernel = np.ones((5, 5), np.uint8)
+        opening = cv2.dilate(cv2.erode(red_mask, kernel), kernel)
+        closing = cv2.erode(cv2.dilate(opening, kernel), kernel)
+
         cv2.imshow('video', frame)
         cv2.imshow('Red Mask (Threshold)', red_mask)
         cv2.imshow('Red Only', red_only)
+        cv2.imshow('After Opening', opening)
+        cv2.imshow('After Closing', closing)
 
 
         if cv2.waitKey(1) & 0xFF == 27:
