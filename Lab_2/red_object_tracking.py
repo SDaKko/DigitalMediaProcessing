@@ -33,6 +33,15 @@ def red_object_tracking():
         opening = cv2.dilate(cv2.erode(red_mask, kernel), kernel)
         closing = cv2.erode(cv2.dilate(opening, kernel), kernel)
 
+        contours, _ = cv2.findContours(closing, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        result_frame = frame.copy()
+
+        if contours:
+            largest_contour = max(contours, key=cv2.contourArea)
+
+            M = cv2.moments(largest_contour)
+            area = M['m00']
+
         cv2.imshow('video', frame)
         cv2.imshow('Red Mask (Threshold)', red_mask)
         cv2.imshow('Red Only', red_only)
