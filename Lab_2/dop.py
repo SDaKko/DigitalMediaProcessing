@@ -1,8 +1,8 @@
 import cv2
 import numpy as np
 
-def red_object_tracking():
 
+def red_object_tracking():
     cap = cv2.VideoCapture(0)
 
     cap.set(3, 640)
@@ -61,20 +61,16 @@ def red_object_tracking():
                         dx = current_center[0] - prev_center[0]
                         dy = current_center[1] - prev_center[1]
 
-
                         movement_history.append((dx, dy))
                         if len(movement_history) > max_history_length:
                             movement_history.pop(0)
 
-
                     prev_center = current_center
-
 
                     if current_center:
                         trajectory.append(current_center)
                         if len(trajectory) > max_trajectory_length:
                             trajectory.pop(0)
-
 
                     for i in range(1, len(trajectory)):
                         cv2.line(result_frame, trajectory[i - 1], trajectory[i],
@@ -101,11 +97,11 @@ def red_object_tracking():
         cv2.imshow('After Closing', closing)
         cv2.imshow('Result with Rectangle', result_frame)
 
-
         if cv2.waitKey(1) & 0xFF == 27:
             break
 
     cap.release()
     cv2.destroyAllWindows()
+
 
 red_object_tracking()
