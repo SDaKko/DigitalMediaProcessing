@@ -7,8 +7,8 @@ def gaussian_function(x, y, sigma):
     return (1 / (2 * np.pi * sigma ** 2)) * np.exp(-(x ** 2 + y ** 2) / (2 * sigma ** 2))
 
 
-sigma = 1.0
-kernel_size = 3
+sigma = 3.0
+kernel_size = 5
 center = math.ceil(kernel_size / 2) - 1
 print(center)
 
@@ -75,6 +75,10 @@ cv2.waitKey(1000)
 img_after_hand_blur = Gauss_filter(img, normalized_matrix)
 
 cv2.imshow("img_after_hand_blur", img_after_hand_blur)
+cv2.waitKey(1000)
+
+blurred = cv2.GaussianBlur(img, (5, 5), 3.0)
+cv2.imshow("img_after_cv_blur", blurred)
 cv2.waitKey(0)
 
 
