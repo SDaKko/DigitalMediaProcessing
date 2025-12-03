@@ -145,14 +145,14 @@ def non_maximum_suppression(magnitude, angle):
                 neighbor1 = magnitude[y, x + 1]  # справа
                 neighbor2 = magnitude[y, x - 1]  # слева
             elif direction == 45:  # Диагональ 45 градусов
-                neighbor1 = magnitude[y + 1, x + 1]  # слева снизу
-                neighbor2 = magnitude[y - 1, x - 1]  # справа сверху
+                neighbor1 = magnitude[y + 1, x + 1]  # слева сверху
+                neighbor2 = magnitude[y - 1, x - 1]  # справа снизу
             elif direction == 90:  # Вертикальное
                 neighbor1 = magnitude[y + 1, x]  # снизу
                 neighbor2 = magnitude[y - 1, x]  # сверху
             elif direction == 135:  # Диагональ 135 градусов
-                neighbor1 = magnitude[y + 1, x - 1]  # ↙
-                neighbor2 = magnitude[y - 1, x + 1]  # ↗
+                neighbor1 = magnitude[y + 1, x - 1]  # слева снизу
+                neighbor2 = magnitude[y - 1, x + 1]  # справа сверху
 
             if current_magnitude >= neighbor1 and current_magnitude >= neighbor2:
                 suppressed[y, x] = current_magnitude
