@@ -77,7 +77,7 @@ img_after_hand_blur = Gauss_filter(img, normalized_matrix)
 cv2.imshow("img_after_hand_blur", img_after_hand_blur)
 cv2.waitKey(1000)
 
-blurred = cv2.GaussianBlur(img, (5, 5), 3.0)
+blurred = cv2.GaussianBlur(img, (3, 3), 1.0)
 cv2.imshow("img_after_cv_blur", blurred)
 cv2.waitKey(0)
 
