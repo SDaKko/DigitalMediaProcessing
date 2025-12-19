@@ -162,7 +162,6 @@ def non_maximum_suppression(magnitude, angle):
     return suppressed
 
 def double_threshold_filtering(magnitude, low_ratio=0.03, high_ratio=0.15):
-    """Двойная пороговая фильтрация"""
     height, width = magnitude.shape
     result = np.zeros((height, width), dtype=np.uint8)
 

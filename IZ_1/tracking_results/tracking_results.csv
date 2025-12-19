@@ -1,0 +1,16 @@
+video_index,video,tracker,fps,success_rate,stability,frames_lost,total_frames,processing_time
+1,camera_follows_car.mp4,KCF,6.48,87.19,0.962,57,445,68.67
+1,camera_follows_car.mp4,CSRT,4.52,87.19,0.769,57,445,98.44
+1,camera_follows_car.mp4,MOSSE,22.34,100.00,0.982,0,445,19.92
+2,car_front.mp4,KCF,22.34,100.00,0.998,0,451,20.19
+2,car_front.mp4,CSRT,9.61,100.00,0.883,0,451,46.93
+2,car_front.mp4,MOSSE,44.48,100.00,0.986,0,451,10.14
+3,distancing_cars.mp4,KCF,34.44,100.00,1.000,0,445,12.92
+3,distancing_cars.mp4,CSRT,17.81,100.00,0.427,0,445,24.98
+3,distancing_cars.mp4,MOSSE,48.37,100.00,0.973,0,445,9.20
+4,off_road_car.mp4,KCF,39.52,100.00,1.000,0,337,8.53
+4,off_road_car.mp4,CSRT,17.38,100.00,0.769,0,337,19.39
+4,off_road_car.mp4,MOSSE,52.61,100.00,0.966,0,337,6.41
+5,zoom_cars.mp4,KCF,44.33,22.80,0.946,254,329,7.42
+5,zoom_cars.mp4,CSRT,17.31,100.00,0.879,0,329,19.01
+5,zoom_cars.mp4,MOSSE,48.77,100.00,0.964,0,329,6.75

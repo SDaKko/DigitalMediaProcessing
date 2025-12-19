@@ -1,708 +1,383 @@
-# fixed_tracking_final.py
-# ПОЛНАЯ РЕАЛИЗАЦИЯ ДЛЯ ИНДИВИДУАЛЬНОГО ЗАДАНИЯ ПО ТРЕКИНГУ
-
 import cv2
 import numpy as np
 import os
 import time
-import json
-from datetime import datetime
-import matplotlib.pyplot as plt
-
-print("=== COMPLETE TRACKING ANALYSIS SYSTEM ===")
-print(f"OpenCV version: {cv2.__version__}")
+import csv
 
 
-class TrackingAnalyzer:
-    """Анализатор качества трекинга"""
+class VideoTrackerEvaluator:
+    def __init__(self, video_paths, output_dir="tracking_results"):
+        """
+        Инициализация системы оценки трекеров
+        """
+        self.video_paths = video_paths
+        self.output_dir = output_dir
+        self.results = []
 
-    def __init__(self):
-        self.metrics = {
-            'success_frames': 0,
-            'total_frames': 0,
-            'tracking_loss_count': 0,
-            'recovery_count': 0,
-            'center_positions': [],
-            'bbox_sizes': [],
-            'processing_times': []
-        }
+        # Создаем директории для результатов
+        os.makedirs(output_dir, exist_ok=True)
+        for tracker in ['KCF', 'CSRT', 'MOSSE']:
+            os.makedirs(os.path.join(output_dir, tracker), exist_ok=True)
 
-    def update(self, success, bbox, processing_time):
-        """Обновление метрик"""
-        self.metrics['total_frames'] += 1
-        self.metrics['processing_times'].append(processing_time)
+    def resize_frame(self, frame, max_width=1280, max_height=720):
+        """Масштабирование кадра"""
+        h, w = frame.shape[:2]
 
-        if success:
-            self.metrics['success_frames'] += 1
-            x, y, w, h = bbox
-            center = (x + w / 2, y + h / 2)
-            self.metrics['center_positions'].append(center)
-            self.metrics['bbox_sizes'].append((w, h))
+        if w <= max_width and h <= max_height:
+            return frame, 1.0, 1.0
 
-            # Проверяем восстановление после потери
-            if len(self.metrics['center_positions']) > 1 and self.metrics['tracking_loss_count'] > 0:
-                prev_center = self.metrics['center_positions'][-2]
-                distance = np.sqrt((center[0] - prev_center[0]) ** 2 + (center[1] - prev_center[1]) ** 2)
-                if distance < 50:  # Порог для определения восстановления
-                    self.metrics['recovery_count'] += 1
+        scale = min(max_width / w, max_height / h)
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+
+        resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        return resized, scale, scale
+
+    def create_tracker(self, tracker_type):
+        """Создание трекера по типу"""
+        if tracker_type == 'KCF':
+            return cv2.TrackerKCF_create()
+        elif tracker_type == 'CSRT':
+            return cv2.TrackerCSRT_create()
+        elif tracker_type == 'MOSSE':
+            return cv2.legacy.TrackerMOSSE_create()
         else:
-            self.metrics['tracking_loss_count'] += 1
-            self.metrics['center_positions'].append(None)
-            self.metrics['bbox_sizes'].append(None)
+            raise ValueError(f"Неизвестный тип трекера: {tracker_type}")
 
-    def calculate_metrics(self):
-        """Расчет итоговых метрик"""
-        total_frames = self.metrics['total_frames']
-        success_frames = self.metrics['success_frames']
+    def evaluate_tracker(self, video_path, tracker_type, video_index):
+        """
+        Оценка одного трекера на одном видео
+        """
+        print(f"\nОценка трекера {tracker_type} на видео: {os.path.basename(video_path)}")
 
-        metrics = {
-            'success_rate': (success_frames / total_frames * 100) if total_frames > 0 else 0,
-            'tracking_loss_frequency': (
-                        self.metrics['tracking_loss_count'] / total_frames * 100) if total_frames > 0 else 0,
-            'recovery_rate': (self.metrics['recovery_count'] / self.metrics['tracking_loss_count'] * 100) if
-            self.metrics['tracking_loss_count'] > 0 else 0,
-            'average_processing_time': np.mean(self.metrics['processing_times']) if self.metrics[
-                'processing_times'] else 0,
-            'stability_score': self._calculate_stability(),
-            'total_frames_processed': total_frames
-        }
-        return metrics
+        # Создаем трекер
+        tracker = self.create_tracker(tracker_type)
 
-    def _calculate_stability(self):
-        """Расчет стабильности трекинга на основе изменения размера bbox"""
-        if len(self.metrics['bbox_sizes']) < 2:
-            return 0
-
-        sizes = [size for size in self.metrics['bbox_sizes'] if size is not None]
-        if len(sizes) < 2:
-            return 0
-
-        size_changes = []
-        for i in range(1, len(sizes)):
-            area1 = sizes[i - 1][0] * sizes[i - 1][1]
-            area2 = sizes[i][0] * sizes[i][1]
-            change = abs(area2 - area1) / area1
-            size_changes.append(change)
-
-        stability = 1 - np.mean(size_changes)
-        return max(0, min(1, stability)) * 100
-
-
-class TrackingSystem:
-    def __init__(self):
-        self.tracker = None
-        self.tracker_type = None
-        self.trajectory = []
-        self.is_initialized = False
-        self.analyzer = TrackingAnalyzer()
-
-    def initialize_tracker(self, tracker_type='CSRT'):
-        """Инициализация конкретного трекера"""
-        try:
-            if tracker_type == 'CSRT':
-                self.tracker = cv2.legacy.TrackerCSRT_create()
-            elif tracker_type == 'KCF':
-                self.tracker = cv2.legacy.TrackerKCF_create()
-            elif tracker_type == 'MOSSE':
-                self.tracker = cv2.legacy.TrackerMOSSE_create()
-            else:
-                print(f"Неизвестный тип трекера: {tracker_type}")
-                return False
-
-            self.tracker_type = tracker_type
-            print(f"Трекер {tracker_type} создан успешно")
-            return True
-
-        except Exception as e:
-            print(f"Ошибка создания трекера {tracker_type}: {e}")
-            return False
-
-    def init_tracking(self, frame, bbox):
-        """Инициализация отслеживания с выбранной областью"""
-        if self.tracker is None:
-            print("Трекер не инициализирован")
-            return False
-
-        try:
-            success = self.tracker.init(frame, bbox)
-            if success:
-                self.is_initialized = True
-                self.trajectory = []
-                # Добавляем первую точку в траекторию
-                x, y, w, h = bbox
-                center = (int(x + w / 2), int(y + h / 2))
-                self.trajectory.append(center)
-                print(f"Трекер {self.tracker_type} инициализирован с bbox: {bbox}")
-            else:
-                print("Не удалось инициализировать трекер с выбранной областью")
-            return success
-        except Exception as e:
-            print(f"Ошибка инициализации трекера: {e}")
-            return False
-
-    def update_tracking(self, frame):
-        """Обновление позиции трекера"""
-        if not self.is_initialized or self.tracker is None:
-            return False, None
-
-        try:
-            start_time = time.time()
-            success, bbox = self.tracker.update(frame)
-            processing_time = time.time() - start_time
-
-            # Обновляем метрики
-            self.analyzer.update(success, bbox, processing_time)
-
-            if success:
-                # Обновляем траекторию
-                x, y, w, h = bbox
-                center = (int(x + w / 2), int(y + h / 2))
-                self.trajectory.append(center)
-
-                # Ограничиваем длину траектории
-                if len(self.trajectory) > 50:
-                    self.trajectory.pop(0)
-
-            return success, bbox
-
-        except Exception as e:
-            print(f"Ошибка обновления трекера: {e}")
-            return False, None
-
-
-class CustomMeanShiftTracker:
-    """Собственная реализация MeanShift трекера"""
-
-    def __init__(self):
-        self.roi_hist = None
-        self.track_window = None
-        self.termination_criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 1)
-
-    def init(self, frame, bbox):
-        """Инициализация трекера"""
-        x, y, w, h = [int(v) for v in bbox]
-        self.track_window = (x, y, w, h)
-
-        # Выделяем ROI
-        roi = frame[y:y + h, x:x + w]
-        hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-
-        # Создаем маску и гистограмму
-        mask = cv2.inRange(hsv_roi, np.array((0., 60., 32.)), np.array((180., 255., 255.)))
-        self.roi_hist = cv2.calcHist([hsv_roi], [0], mask, [180], [0, 180])
-        cv2.normalize(self.roi_hist, self.roi_hist, 0, 255, cv2.NORM_MINMAX)
-
-        return True
-
-    def update(self, frame):
-        """Обновление позиции объекта"""
-        if self.roi_hist is None:
-            return False, None
-
-        try:
-            start_time = time.time()
-
-            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-            dst = cv2.calcBackProject([hsv], [0], self.roi_hist, [0, 180], 1)
-
-            # Применяем MeanShift
-            ret, self.track_window = cv2.meanShift(dst, self.track_window, self.termination_criteria)
-
-            processing_time = time.time() - start_time
-
-            if ret:
-                x, y, w, h = self.track_window
-                return True, (x, y, w, h), processing_time
-            else:
-                return False, None, processing_time
-
-        except Exception as e:
-            print(f"Ошибка в CustomMeanShiftTracker: {e}")
-            return False, None, 0
-
-
-def create_test_videos():
-    """Создает набор тестовых видео для анализа"""
-    videos_info = []
-
-    # 1. Простое движение (базовый тест)
-    video1 = "test_simple_motion.mp4"
-    if not os.path.exists(video1):
-        print("Создаем видео с простым движением...")
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(video1, fourcc, 25.0, (800, 600))
-
-        for i in range(100):
-            frame = np.full((600, 800, 3), 50, dtype=np.uint8)
-
-            # Простая траектория
-            center_x = 100 + int(600 * (i / 100))
-            center_y = 300
-
-            # Рисуем объект
-            cv2.rectangle(frame, (center_x - 40, center_y - 30), (center_x + 40, center_y + 30), (0, 0, 200), -1)
-            cv2.rectangle(frame, (center_x - 40, center_y - 30), (center_x + 40, center_y + 30), (0, 0, 255), 2)
-
-            out.write(frame)
-        out.release()
-        videos_info.append((video1, "Простое линейное движение", 25, 100))
-
-    # 2. Движение с изменением масштаба
-    video2 = "test_scale_change.mp4"
-    if not os.path.exists(video2):
-        print("Создаем видео с изменением масштаба...")
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(video2, fourcc, 25.0, (800, 600))
-
-        for i in range(100):
-            frame = np.full((600, 800, 3), 50, dtype=np.uint8)
-
-            center_x = 400
-            center_y = 300
-            size = 20 + int(60 * abs(np.sin(i * 0.1)))
-
-            cv2.rectangle(frame, (center_x - size, center_y - size), (center_x + size, center_y + size), (0, 200, 0),
-                          -1)
-            cv2.rectangle(frame, (center_x - size, center_y - size), (center_x + size, center_y + size), (0, 255, 0), 2)
-
-            out.write(frame)
-        out.release()
-        videos_info.append((video2, "Изменение масштаба", 25, 100))
-
-    # 3. Быстрое движение
-    video3 = "test_fast_motion.mp4"
-    if not os.path.exists(video3):
-        print("Создаем видео с быстрым движением...")
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(video3, fourcc, 25.0, (800, 600))
-
-        for i in range(100):
-            frame = np.full((600, 800, 3), 50, dtype=np.uint8)
-
-            center_x = 100 + (i * 7) % 600
-            center_y = 100 + int(100 * np.sin(i * 0.3))
-
-            cv2.rectangle(frame, (center_x - 30, center_y - 30), (center_x + 30, center_y + 30), (200, 0, 0), -1)
-            cv2.rectangle(frame, (center_x - 30, center_y - 30), (center_x + 30, center_y + 30), (255, 0, 0), 2)
-
-            out.write(frame)
-        out.release()
-        videos_info.append((video3, "Быстрое движение", 25, 100))
-
-    # 4. Движение с occlusion (перекрытием)
-    video4 = "test_occlusion.mp4"
-    if not os.path.exists(video4):
-        print("Создаем видео с перекрытием...")
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(video4, fourcc, 25.0, (800, 600))
-
-        for i in range(150):
-            frame = np.full((600, 800, 3), 50, dtype=np.uint8)
-
-            # Основной объект
-            center_x = 100 + int(400 * (i / 150))
-            center_y = 300
-
-            cv2.rectangle(frame, (center_x - 40, center_y - 30), (center_x + 40, center_y + 30), (0, 0, 200), -1)
-            cv2.rectangle(frame, (center_x - 40, center_y - 30), (center_x + 40, center_y + 30), (0, 0, 255), 2)
-
-            # Перекрывающий объект (на некоторых кадрах)
-            if 50 <= i <= 100:
-                occlusion_x = center_x + 20
-                cv2.rectangle(frame, (occlusion_x - 50, center_y - 40), (occlusion_x + 50, center_y + 40),
-                              (100, 100, 100), -1)
-
-            out.write(frame)
-        out.release()
-        videos_info.append((video4, "Движение с перекрытием", 25, 150))
-
-    # 5. Сложная траектория
-    video5 = "test_complex_trajectory.mp4"
-    if not os.path.exists(video5):
-        print("Создаем видео со сложной траекторией...")
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(video5, fourcc, 25.0, (800, 600))
-
-        for i in range(120):
-            frame = np.full((600, 800, 3), 50, dtype=np.uint8)
-
-            t = i / 30
-            center_x = 400 + int(200 * np.cos(t) * np.sin(2 * t))
-            center_y = 300 + int(150 * np.sin(t) * np.cos(3 * t))
-
-            cv2.rectangle(frame, (center_x - 35, center_y - 25), (center_x + 35, center_y + 25), (200, 200, 0), -1)
-            cv2.rectangle(frame, (center_x - 35, center_y - 25), (center_x + 35, center_y + 25), (255, 255, 0), 2)
-
-            out.write(frame)
-        out.release()
-        videos_info.append((video5, "Сложная траектория", 25, 120))
-
-    return videos_info
-
-
-def run_comparative_analysis():
-    """Запуск сравнительного анализа трекеров"""
-    print("\n" + "=" * 60)
-    print("ЗАПУСК СРАВНИТЕЛЬНОГО АНАЛИЗА ТРЕКЕРОВ")
-    print("=" * 60)
-
-    # Создаем тестовые видео
-    test_videos = create_test_videos()
-
-    # Трекеры для сравнения
-    trackers_to_test = ['CSRT', 'KCF', 'MOSSE']
-
-    results = {}
-
-    for video_path, description, fps, total_frames in test_videos:
-        print(f"\nАнализ видео: {description}")
-        print(f"   Файл: {video_path}")
-        print(f"   Параметры: {fps} FPS, {total_frames} кадров")
-
-        video_results = {}
-
-        for tracker_type in trackers_to_test:
-            print(f"\n   Тестирование трекера: {tracker_type}")
-
-            # Запускаем трекинг
-            metrics = run_single_tracking_test(video_path, tracker_type, description)
-            video_results[tracker_type] = metrics
-
-            print(f"      Успешных кадров: {metrics['success_rate']:.1f}%")
-            print(f"      Среднее время обработки: {metrics['average_processing_time'] * 1000:.1f}ms")
-            print(f"      Частота потерь: {metrics['tracking_loss_frequency']:.1f}%")
-
-        results[description] = video_results
-
-    # Сохраняем результаты
-    save_comparison_results(results, test_videos)
-
-    # Создаем сводную таблицу
-    create_summary_table(results)
-
-    return results
-
-
-def run_single_tracking_test(video_path, tracker_type, video_description):
-    """Запуск одного теста трекинга"""
-    cap = cv2.VideoCapture(video_path)
-
-    if not cap.isOpened():
-        print(f"Не удалось открыть видео: {video_path}")
-        return None
-
-    # Создаем систему трекинга
-    tracking_system = TrackingSystem()
-
-    if not tracking_system.initialize_tracker(tracker_type):
-        cap.release()
-        return None
-
-    # Читаем первый кадр и выбираем объект автоматически
-    ret, frame = cap.read()
-    if not ret:
-        cap.release()
-        return None
-
-    # Автоматический выбор bbox (центр кадра)
-    height, width = frame.shape[:2]
-    bbox = (width // 2 - 50, height // 2 - 50, 100, 100)
-
-    if not tracking_system.init_tracking(frame, bbox):
-        cap.release()
-        return None
-
-    # Обрабатываем все кадры
-    frame_count = 1
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        success, bbox = tracking_system.update_tracking(frame)
-        frame_count += 1
-
-    cap.release()
-
-    # Получаем метрики
-    metrics = tracking_system.analyzer.calculate_metrics()
-    return metrics
-
-
-def run_custom_tracker_test():
-    """Тестирование собственного трекера"""
-    print("\nТЕСТИРОВАНИЕ СОБСТВЕННОЙ РЕАЛИЗАЦИИ TRACKER")
-
-    test_videos = create_test_videos()
-    custom_tracker_results = {}
-
-    for video_path, description, fps, total_frames in test_videos:
-        print(f"\nТестирование на видео: {description}")
-
+        # Открываем видео
         cap = cv2.VideoCapture(video_path)
-
         if not cap.isOpened():
-            continue
+            print(f"Ошибка загрузки видео: {video_path}")
+            return None
 
-        # Создаем кастомный трекер
-        custom_tracker = CustomMeanShiftTracker()
-        analyzer = TrackingAnalyzer()
+        # Получаем параметры видео
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fourcc_code = int(cap.get(cv2.CAP_PROP_FOURCC))
+        codec = ''.join([chr((fourcc_code >> 8 * i) & 0xFF) for i in range(4)])
 
-        # Инициализация
+        print(f"Параметры видео: {width}x{height}, {fps:.1f} FPS, {total_frames} кадров, {codec} кодек")
+
+        # Настройка VideoWriter для сохранения результата
+        output_filename = f"video{video_index + 1}_{tracker_type}.mp4"
+        output_path = os.path.join(self.output_dir, tracker_type, output_filename)
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
+        # Читаем первый кадр для инициализации
         ret, frame = cap.read()
         if not ret:
-            cap.release()
-            continue
+            print("Не удалось прочитать первый кадр")
+            return None
 
-        height, width = frame.shape[:2]
-        bbox = (width // 2 - 50, height // 2 - 50, 100, 100)
+        # Масштабируем для выбора ROI
+        display_frame, scale_x, scale_y = self.resize_frame(frame)
+        cv2.imshow("Выберите объект для трекинга", display_frame)
+        bbox = cv2.selectROI("Выберите объект для трекинга", display_frame, False)
+        cv2.destroyWindow("Выберите объект для трекинга")
 
-        if not custom_tracker.init(frame, bbox):
-            cap.release()
-            continue
+        # Масштабируем bbox обратно
+        original_bbox = (
+            int(bbox[0] / scale_x),
+            int(bbox[1] / scale_y),
+            int(bbox[2] / scale_x),
+            int(bbox[3] / scale_y)
+        )
 
-        # Обработка кадров
-        frame_count = 1
+        # Сохраняем начальный bounding box для вычисления стабильности
+        initial_bbox = original_bbox
+
+        # Инициализируем трекер
+        tracker.init(frame, original_bbox)
+
+        # Метрики для оценки
+        success_frames = 0
+        total_frames_processed = 0
+        frame_times = []
+        stability_values = []  # Стабильность размера bounding box
+
+        print("Обработка видео...")
+        start_time = time.time()
+
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
 
-            success, bbox, processing_time = custom_tracker.update(frame)
+            frame_start = time.time()
+
+            # Обновляем трекер
+            success, tracked_bbox = tracker.update(frame)
+
+            frame_time = time.time() - frame_start
+            frame_times.append(frame_time)
+
+            total_frames_processed += 1
+
+            # Вычисляем метрики
             if success:
-                analyzer.update(True, bbox, processing_time)
+                success_frames += 1
+
+                # Вычисляем стабильность (изменение размера относительно начального)
+                if initial_bbox[2] > 0 and initial_bbox[3] > 0:
+                    width_change = abs(tracked_bbox[2] - initial_bbox[2]) / initial_bbox[2]
+                    height_change = abs(tracked_bbox[3] - initial_bbox[3]) / initial_bbox[3]
+                    stability = 1.0 - (width_change + height_change) / 2.0
+                    stability_values.append(max(0, stability))
+
+                # Рисуем bounding box
+                x, y, w, h = [int(v) for v in tracked_bbox]
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+                # Отображаем метрики на кадре
+                cv2.putText(frame, f"Tracker: {tracker_type}", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+                # Показываем номер кадра
+                cv2.putText(frame, f"Frame: {total_frames_processed}", (10, 60),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             else:
-                analyzer.update(False, None, processing_time)
+                cv2.putText(frame, "OBJECT LOST", (width // 2 - 100, height // 2),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
+                cv2.putText(frame, f"Tracker: {tracker_type}", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-            frame_count += 1
-
-        cap.release()
-
-        metrics = analyzer.calculate_metrics()
-        custom_tracker_results[description] = metrics
-
-        print(f"   Успешных кадров: {metrics['success_rate']:.1f}%")
-        print(f"   Среднее время обработки: {metrics['average_processing_time'] * 1000:.1f}ms")
-
-    return custom_tracker_results
-
-
-def save_comparison_results(results, videos_info):
-    """Сохранение результатов сравнения"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"tracking_comparison_{timestamp}.json"
-
-    output_data = {
-        'test_date': timestamp,
-        'test_videos': [
-            {
-                'description': desc,
-                'file_path': path,
-                'fps': fps,
-                'total_frames': frames
-            } for (path, desc, fps, frames) in videos_info
-        ],
-        'results': results
-    }
-
-    with open(filename, 'w', encoding='utf-8') as f:
-        json.dump(output_data, f, indent=2, ensure_ascii=False)
-
-    print(f"\nРезультаты сохранены в: {filename}")
-    return filename
-
-
-def create_summary_table(results):
-    """Создание сводной таблицы результатов"""
-    print("\n" + "=" * 80)
-    print("СВОДНАЯ ТАБЛИЦА РЕЗУЛЬТАТОВ СРАВНИТЕЛЬНОГО АНАЛИЗА")
-    print("=" * 80)
-
-    # Заголовок таблицы
-    print(
-        f"\n{'Видео тест':<25} {'Трекер':<8} {'Успешность (%)':<15} {'Потери (%)':<12} {'Восстановление (%)':<18} {'Время (ms)':<12} {'Стабильность':<12}")
-    print("-" * 110)
-
-    for video_name, video_results in results.items():
-        print(f"{video_name:<25}")
-        for tracker_name, metrics in video_results.items():
-            print(f"{'':<25} {tracker_name:<8} {metrics['success_rate']:<15.1f} "
-                  f"{metrics['tracking_loss_frequency']:<12.1f} {metrics['recovery_rate']:<18.1f} "
-                  f"{metrics['average_processing_time'] * 1000:<12.1f} {metrics['stability_score']:<12.1f}")
-
-
-def run_interactive_demo():
-    """Интерактивная демонстрация работы трекеров"""
-    print("\nЗАПУСК ИНТЕРАКТИВНОЙ ДЕМОНСТРАЦИИ")
-
-    # Создаем тестовые видео
-    test_videos = create_test_videos()
-
-    if not test_videos:
-        print("Не удалось создать тестовые видео")
-        return
-
-    # Используем первое видео для демо
-    video_path = test_videos[0][0]
-    description = test_videos[0][1]
-
-    print(f"Демонстрация на видео: {description}")
-
-    cap = cv2.VideoCapture(video_path)
-
-    if not cap.isOpened():
-        print(f"Не удалось открыть видео: {video_path}")
-        return
-
-    # Выбор трекера
-    print("\nВыберите трекер для демонстрации:")
-    print("   1. CSRT (точный)")
-    print("   2. KCF (баланс скорости/точности)")
-    print("   3. MOSSE (быстрый)")
-    print("   4. Custom MeanShift (собственная реализация)")
-
-    choice = input("Введите номер (1-4): ").strip()
-
-    tracker_map = {'1': 'CSRT', '2': 'KCF', '3': 'MOSSE', '4': 'CUSTOM'}
-    tracker_type = tracker_map.get(choice, 'KCF')
-
-    if tracker_type == 'CUSTOM':
-        # Используем кастомный трекер
-        tracker = CustomMeanShiftTracker()
-        use_custom = True
-    else:
-        # Используем библиотечный трекер
-        tracking_system = TrackingSystem()
-        tracking_system.initialize_tracker(tracker_type)
-        use_custom = False
-
-    # Инициализация
-    ret, frame = cap.read()
-    if not ret:
-        cap.release()
-        return
-
-    height, width = frame.shape[:2]
-    bbox = (width // 2 - 50, height // 2 - 50, 100, 100)
-
-    if use_custom:
-        tracker.init(frame, bbox)
-    else:
-        tracking_system.init_tracking(frame, bbox)
-
-    print(f"\nЗапуск демонстрации с трекером: {tracker_type}")
-    print("Управление: q - выход, r - перезапуск, p - пауза")
-
-    paused = False
-
-    while True:
-        if not paused:
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            display_frame = frame.copy()
-
-            if use_custom:
-                success, bbox, _ = tracker.update(frame)
-            else:
-                success, bbox = tracking_system.update_tracking(frame)
-
-            if success:
-                x, y, w, h = [int(v) for v in bbox]
-                cv2.rectangle(display_frame, (x, y), (x + w, y + h), (0, 255, 0), 3)
-
-                if not use_custom:
-                    # Рисуем траекторию для библиотечных трекеров
-                    for i in range(1, len(tracking_system.trajectory)):
-                        cv2.line(display_frame,
-                                 tracking_system.trajectory[i - 1],
-                                 tracking_system.trajectory[i],
-                                 (255, 255, 0), 2)
-
-            cv2.putText(display_frame, f"Tracker: {tracker_type}", (10, 30),
+            # Вычисляем текущий FPS
+            current_fps = 1.0 / frame_time if frame_time > 0 else 0
+            cv2.putText(frame, f"FPS: {current_fps:.1f}", (10, 90),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-            cv2.putText(display_frame, "Status: TRACKING" if success else "Status: LOST",
-                        (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                        (0, 255, 0) if success else (0, 0, 255), 2)
 
-            cv2.imshow(f"Tracking Demo - {tracker_type}", display_frame)
+            # Показываем процент успешности
+            success_percent = (success_frames / total_frames_processed * 100) if total_frames_processed > 0 else 0
+            cv2.putText(frame, f"Success: {success_percent:.1f}%", (10, 120),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
-            break
-        elif key == ord('r'):
-            # Перезапуск
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            ret, frame = cap.read()
-            if ret:
-                if use_custom:
-                    tracker.init(frame, bbox)
-                else:
-                    tracking_system.init_tracking(frame, bbox)
-        elif key == ord('p'):
-            paused = not paused
+            # Сохраняем кадр в видеофайл
+            out.write(frame)
 
-    cap.release()
-    cv2.destroyAllWindows()
+            # Показываем прогресс в консоли
+            if total_frames_processed % 50 == 0:
+                progress = (total_frames_processed / total_frames) * 100
+                print(f"  Прогресс: {progress:.1f}% ({total_frames_processed}/{total_frames} кадров)")
+
+        # Завершаем обработку
+        processing_time = time.time() - start_time
+        cap.release()
+        out.release()
+
+        # Вычисляем финальные метрики
+        success_rate = (success_frames / total_frames_processed * 100) if total_frames_processed > 0 else 0
+        avg_fps = total_frames_processed / processing_time if processing_time > 0 else 0
+        avg_stability = np.mean(stability_values) if stability_values else 0
+
+        result = {
+            'video': os.path.basename(video_path),
+            'video_index': video_index + 1,
+            'tracker': tracker_type,
+            'fps': avg_fps,
+            'success_rate': success_rate,
+            'stability': avg_stability,
+            'frames_lost': total_frames_processed - success_frames,
+            'total_frames': total_frames_processed,
+            'processing_time': processing_time,
+            'output_path': output_path
+        }
+
+        print(f"\nРезультаты трекера {tracker_type}:")
+        print(f"  Средний FPS: {avg_fps:.2f}")
+        print(f"  Успешность трекинга: {success_rate:.2f}%")
+        print(f"  Стабильность размера BB: {avg_stability:.3f}")
+        print(f"  Потерянные кадры: {result['frames_lost']}")
+        print(f"  Общее время обработки: {processing_time:.2f} сек")
+        print(f"  Видео сохранено в: {output_path}")
+
+        return result
+
+    def run_evaluation(self):
+        """
+        Запуск оценки всех трекеров на всех видео
+        """
+        tracker_types = ['KCF', 'CSRT', 'MOSSE']
+
+        print("=" * 80)
+        print("НАЧАЛО ОЦЕНКИ ТРЕКЕРОВ")
+        print("=" * 80)
+
+        for video_idx, video_path in enumerate(self.video_paths):
+            print(f"\n{'=' * 40}")
+            print(f"ВИДЕО {video_idx + 1}: {os.path.basename(video_path)}")
+            print(f"{'=' * 40}")
+
+            for tracker_type in tracker_types:
+                result = self.evaluate_tracker(video_path, tracker_type, video_idx)
+                if result:
+                    self.results.append(result)
+                cv2.destroyAllWindows()  # Закрываем все окна между трекерами
+
+        # Сохраняем результаты
+        self.save_results()
+
+        # Генерируем отчет
+        self.generate_report()
+
+    def save_results(self):
+        """Сохранение результатов в CSV файл"""
+        if not self.results:
+            print("Нет результатов для сохранения")
+            return
+
+        csv_path = os.path.join(self.output_dir, "tracking_results.csv")
+
+        with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['video_index', 'video', 'tracker', 'fps', 'success_rate',
+                          'stability', 'frames_lost', 'total_frames', 'processing_time']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            writer.writeheader()
+            for result in self.results:
+                writer.writerow({
+                    'video_index': result['video_index'],
+                    'video': result['video'],
+                    'tracker': result['tracker'],
+                    'fps': f"{result['fps']:.2f}",
+                    'success_rate': f"{result['success_rate']:.2f}",
+                    'stability': f"{result['stability']:.3f}",
+                    'frames_lost': result['frames_lost'],
+                    'total_frames': result['total_frames'],
+                    'processing_time': f"{result['processing_time']:.2f}"
+                })
+
+        print(f"\nРезультаты сохранены в: {csv_path}")
+
+    def generate_report(self):
+        """Генерация текстового отчета"""
+        if not self.results:
+            print("Нет результатов для отчета")
+            return
+
+        print("\n" + "=" * 80)
+        print("ОТЧЕТ ПО РЕЗУЛЬТАТАМ ТРЕКИНГА")
+        print("=" * 80)
+
+        # Группируем результаты по трекерам
+        tracker_results = {}
+        for result in self.results:
+            tracker = result['tracker']
+            if tracker not in tracker_results:
+                tracker_results[tracker] = []
+            tracker_results[tracker].append(result)
+
+        # Выводим таблицу результатов
+        print("\nТАБЛИЦА РЕЗУЛЬТАТОВ:")
+        print("-" * 100)
+        print(f"{'Видео':<15} {'Трекер':<8} {'FPS':<8} {'Успешность':<12} {'Стабильность':<12} {'Потери':<8}")
+        print("-" * 100)
+
+        for result in self.results:
+            print(f"{result['video']:<15} {result['tracker']:<8} {result['fps']:<8.1f} "
+                  f"{result['success_rate']:<12.1f}% {result['stability']:<12.3f} "
+                  f"{result['frames_lost']:<8}")
+
+        # Средние значения по трекерам
+        print("\n" + "=" * 80)
+        print("СРЕДНИЕ ЗНАЧЕНИЯ ПО ТРЕКЕРАМ:")
+        print("-" * 80)
+        print(f"{'Трекер':<8} {'Ср. FPS':<10} {'Ср. успешность':<15} {'Ср. стабильность':<16}")
+        print("-" * 80)
+
+        for tracker in ['KCF', 'CSRT', 'MOSSE']:
+            if tracker in tracker_results:
+                avg_fps = np.mean([r['fps'] for r in tracker_results[tracker]])
+                avg_success = np.mean([r['success_rate'] for r in tracker_results[tracker]])
+                avg_stability = np.mean([r['stability'] for r in tracker_results[tracker]])
+                print(f"{tracker:<8} {avg_fps:<10.1f} {avg_success:<15.1f}% {avg_stability:<16.3f}")
+
+        # Рекомендации
+        print("\n" + "=" * 80)
+        print("РЕКОМЕНДАЦИИ:")
+        print("=" * 80)
+
+        # Находим лучшие трекеры по разным метрикам
+        best_by_fps = max(self.results, key=lambda x: x['fps'])
+        best_by_success = max(self.results, key=lambda x: x['success_rate'])
+        best_by_stability = max(self.results, key=lambda x: x['stability'])
+
+        print(f"1. Для максимальной скорости (FPS): {best_by_fps['tracker']} "
+              f"({best_by_fps['fps']:.1f} FPS на видео {best_by_fps['video']})")
+        print(f"2. Для максимальной надежности: {best_by_success['tracker']} "
+              f"({best_by_success['success_rate']:.1f}% успешных кадров на видео {best_by_success['video']})")
+        print(f"3. Для максимальной стабильности: {best_by_stability['tracker']} "
+              f"(стабильность: {best_by_stability['stability']:.3f} на видео {best_by_stability['video']})")
+
+        # Создаем итоговый текстовый репорт
+        report_path = os.path.join(self.output_dir, "final_report.txt")
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write("ОТЧЕТ ПО СРАВНИТЕЛЬНОМУ АНАЛИЗУ ТРЕКЕРОВ\n")
+            f.write("=" * 60 + "\n\n")
+
+            f.write("ПРОАНАЛИЗИРОВАНО ВИДЕО:\n")
+            for i, video in enumerate(self.video_paths, 1):
+                f.write(f"{i}. {os.path.basename(video)}\n")
+
+        print(f"\nПолный отчет сохранен в: {report_path}")
+
+        # Информация о сохраненных видеофайлах
+        print("\n" + "=" * 80)
+        print("СОХРАНЕННЫЕ ВИДЕОФАЙЛЫ:")
+        print("=" * 80)
+
+        video_count = 0
+        for tracker in ['KCF', 'CSRT', 'MOSSE']:
+            tracker_dir = os.path.join(self.output_dir, tracker)
+            if os.path.exists(tracker_dir):
+                videos = [f for f in os.listdir(tracker_dir) if f.endswith('.mp4')]
+                print(f"\n{tracker} трекер ({len(videos)} видео):")
+                for video in videos:
+                    print(f"  - {video}")
+                    video_count += 1
+
+        print(f"\nВсего сохранено видеофайлов: {video_count}")
+        print("Оригинальные видео: 5")
+        print("Обработанные видео: 15")
+        print("Всего файлов: 20")
 
 
 def main():
-    """Главная функция"""
-    print("СИСТЕМА АНАЛИЗА МЕТОДОВ ТРЕКИНГА")
-    print("\nВыберите режим работы:")
-    print("1. Полный сравнительный анализ (все трекеры + все видео)")
-    print("2. Тестирование собственного трекера")
-    print("3. Интерактивная демонстрация")
-    print("4. Только создание тестовых видео")
+    print("ПРОГРАММА СРАВНИТЕЛЬНОГО АНАЛИЗА ТРЕКЕРОВ ОБЪЕКТОВ")
+    print("=" * 60)
 
-    choice = input("Введите номер (1-4): ").strip()
+    # Создаем папку для тестовых видео, если нет реальных
+    test_videos_dir = "test_videos"
+    os.makedirs(test_videos_dir, exist_ok=True)
 
-    if choice == '1':
-        # Полный сравнительный анализ
-        results = run_comparative_analysis()
+    # video_paths = ["car.mp4"]
+    video_paths = ["camera_follows_car.mp4", "car_front.mp4", "distancing_cars.mp4", "off_road_car.mp4", "zoom_cars.mp4"]
 
-        # Дополнительно тестируем кастомный трекер
-        print("\n" + "=" * 60)
-        print("ДОПОЛНИТЕЛЬНОЕ ТЕСТИРОВАНИЕ СОБСТВЕННОГО ТРЕКЕРА")
-        print("=" * 60)
+    if not video_paths:
+        print("Ошибка: не найдено видеофайлов!")
+        return
 
-        custom_results = run_custom_tracker_test()
+    print(f"\nБудет проанализировано {len(video_paths)} видео:")
+    for i, video in enumerate(video_paths, 1):
+        print(f"{i}. {video}")
 
-        # Добавляем кастомный трекер в результаты
-        for video_name, metrics in custom_results.items():
-            if video_name in results:
-                results[video_name]['CUSTOM'] = metrics
+    # Запускаем оценку
+    evaluator = VideoTrackerEvaluator(video_paths)
+    evaluator.run_evaluation()
 
-        # Обновляем таблицу
-        create_summary_table(results)
-
-    elif choice == '2':
-        # Только тестирование кастомного трекера
-        custom_results = run_custom_tracker_test()
-
-        # Выводим результаты
-        print("\nРЕЗУЛЬТАТЫ КАСТОМНОГО ТРЕКЕРА:")
-        for video_name, metrics in custom_results.items():
-            print(f"\n{video_name}:")
-            print(f"  Успешность: {metrics['success_rate']:.1f}%")
-            print(f"  Время обработки: {metrics['average_processing_time'] * 1000:.1f}ms")
-            print(f"  Стабильность: {metrics['stability_score']:.1f}%")
-
-    elif choice == '3':
-        # Интерактивная демонстрация
-        run_interactive_demo()
-
-    elif choice == '4':
-        # Только создание видео
-        videos = create_test_videos()
-        print(f"\nСоздано {len(videos)} тестовых видео:")
-        for path, desc, fps, frames in videos:
-            print(f"   {desc}: {path}")
-    else:
-        print("Неверный выбор")
-
+    print("\n" + "=" * 80)
+    print("ОЦЕНКА ВЫПОЛНЕНА УСПЕШНО!")
 
 if __name__ == "__main__":
     main()
-    print("\nПРОГРАММА ЗАВЕРШЕНА!")
